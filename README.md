@@ -40,7 +40,7 @@ Users can drag soft blocks, inspect placement metrics, detect hard constraint vi
 | **Interaction** | Drag-to-place soft blocks, snap-to-edge alignment guides, hover inspector |
 | **Evaluation** | Real-time bounding-box area, HPWL wirelength, overlap detection, area constraint check |
 | **Data** | In-browser block editor, JSON import/upload, JSON export |
-| **Visualization** | 9 enterprise color palettes, layer visibility toggles (Soft / Hard / Nets / Grid) |
+| **Visualization** | 3 enterprise color palettes, layer visibility toggles (Soft / Hard / Nets / Grid) |
 | **Status Bar** | Live cursor coordinates, feasibility indicator, contest evaluator label |
 
 ---
@@ -90,6 +90,7 @@ Recommended browsers: **Chrome 90+**, **Edge 90+**, **Firefox 88+**, **Safari 15
 | Move a soft block | Click & drag the block |
 | Inspect a block | Hover over it — details appear in the left inspector panel |
 | Reset layout | Click the **Reset** (circular arrow) button in the floating toolbar |
+| Generate random layout | Click the **Random** (dice) button in the floating toolbar |
 
 > **Hard** and **Terminal** blocks are fixed placement constraints and cannot be dragged. Attempting to move them displays a toast notification.
 
@@ -177,19 +178,13 @@ Click **Settings** in the top-right to open the system preferences panel.
 | Nets (HPWL) | Visibility of net connection lines |
 | Infinite Grid & Axes | Visibility of the adaptive grid and axis labels |
 
-**Color palettes (9 themes):**
+**Color palettes (3 themes):**
 
 | Theme | Description |
 |---|---|
 | High-Contrast White | Light mode; optimized for print and reports *(default)* |
-| Carbon Graphite Grey | Neutral, low-glare dark canvas |
 | Deep Industrial Navy | Classic engineering dark theme |
-| Laboratory Green | Medical/bio visualization mode |
-| Amber Sunset Glow | Warm amber on dark |
-| Violet Nightshade | Deep purple dark theme |
 | Quantum Blackhole | Absolute pitch-black; maximum contrast |
-| Ocean Breeze Blue | Vibrant sky-blue dark theme |
-| Blossoming Rose | Soft rose high-contrast dark theme |
 
 Theme changes apply CSS custom properties via `document.documentElement.style.setProperty` for instant, flicker-free transitions across the entire UI and canvas.
 
@@ -199,13 +194,20 @@ Theme changes apply CSS custom properties via `document.documentElement.style.se
 
 ```
 .
-├── index.html        # Application shell, modal definitions, canvas element
-├── script.js         # Rendering, interaction, evaluation, and editor logic
-├── style.css         # CSS variables, layout system, component styles
-└── ICCAD pC.pdf      # ICCAD 2026 contest problem specification (reference)
+├── index.html              # Application shell, native <dialog> modals, canvas element
+├── css/
+│   └── style.css           # CSS variables, layout system, component styles
+├── js/
+│   ├── App.js              # AppController — bootstrap, event wiring, UI coordination
+│   ├── engine/
+│   │   ├── Config.js       # Exported constants: die dimensions, tolerances, palettes, initial data
+│   │   └── Evaluator.js    # LayoutEvaluator static class — constraint checking and cost computation
+│   └── view/
+│       └── Renderer.js     # CanvasRenderer class — HiDPI drawing, grid, blocks, nets, zoom/pan
+└── ICCAD pC.pdf            # ICCAD 2026 contest problem specification (reference)
 ```
 
-The entire application is self-contained in three files — no frameworks, no bundler, no package manager.
+The application runs without any build toolchain, bundler, or package manager. Modules are loaded natively via `<script type="module">`.
 
 ---
 
@@ -222,7 +224,7 @@ resizeCanvas()
   └── ctx.scale(dpr, dpr)                            (normalize back to CSS px)
 ```
 
-Each frame (`drawScene`) applies a transform stack:
+Each frame (`CanvasRenderer.draw()`) applies a transform stack:
 
 ```
 ctx.translate(panX, panY)    →  world offset
@@ -299,6 +301,39 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### [Unreleased]
 
 > Changes staged but not yet tagged.
+
+---
+
+### [1.1.0] — 2026-06-27
+
+#### Added
+- **Random Layout Generator** (`btnRandom` / dice icon in floating toolbar): procedurally generates a randomized testcase with 3–7 soft blocks, 1–3 hard blocks, 1–2 terminals, and 4–9 weighted nets placed within die boundaries. Intended for rapid stress-testing of the constraint evaluator.
+- **Native `<dialog>` modals**: Settings and Data Editor modals now use the HTML `<dialog>` element with `showModal()` / `close()` and a native `::backdrop` blur overlay, eliminating custom overlay state management and improving accessibility (focus trap, `Escape` to close).
+- **Google Fonts preloading**: `<link rel="preconnect">` and stylesheet for Inter (UI) and JetBrains Mono (monospace) loaded via CDN, replacing system font fallback chain as primary font source.
+- **`LayoutEvaluator.evaluate()`** now returns a structured result object `{ area, hpwl, totalViolations, estimatedCost }`, decoupling metric computation from DOM updates.
+- **`CanvasRenderer.layers`** property (`{ soft, hard, nets, grid }`) encapsulates layer visibility state inside the renderer, replacing module-level boolean variables.
+- **Status indicator `.error` CSS class**: the green status dot in the status bar transitions to red via `.error` class on constraint violation, replacing inline style overrides.
+- **Inspector `.prop-label` uppercase transform** and `.prop-value` bold weight for improved data hierarchy legibility.
+- **Editor table header `text-transform: uppercase`** for visual consistency with section headers.
+
+#### Changed
+- **Project structure refactored from monolith to ES Module architecture**: the single `script.js` (821 lines) is split into four focused modules under `js/`:
+  - `js/engine/Config.js` — all magic numbers (`DIE_WIDTH`, `DIE_HEIGHT`, `AREA_TOLERANCE`, `SNAP_DISTANCE_BASE`), palette definitions, and initial testcase data exported as named ES Module exports.
+  - `js/engine/Evaluator.js` — `LayoutEvaluator` static class encapsulating overlap detection (`isOverlapping`), area constraint verification, HPWL computation, and bounding-box area calculation.
+  - `js/view/Renderer.js` — `CanvasRenderer` class owning canvas lifecycle (`resizeCanvas`, `centerView`, `applyZoom`, `getMousePos`), palette application (`setPalette`), and the full draw pipeline split into private methods `_drawGrid`, `_drawNets`, `_drawBlocks`, `_createHatchPattern`.
+  - `js/App.js` — `AppController` class wiring all modules together: event binding, UI coordination, drag/pan state management, and editor operations.
+- **CSS moved** from `style.css` to `css/style.css`; `index.html` stylesheet reference updated accordingly.
+- **`index.html` script tag** changed from `<script src="script.js">` to `<script type="module" src="js/App.js">`.
+- **Modal close mechanism** changed from `onclick="closeModal('id')"` inline handlers to `data-close="id"` attribute convention delegated to a single `querySelectorAll` listener in `AppController.initUI()`.
+- **`dragState` object** consolidates all drag and pan state (`dragged`, `hovered`, `snapX`, `snapY`, `offsetX`, `offsetY`, `isPanning`, `panStartX/Y`, `initPanX/Y`) into a single struct on `AppController`, eliminating scattered module-level variables.
+- **Hatch pattern** is now generated once per `setPalette()` call and cached as `CanvasRenderer.hatchPattern`, rather than recreated on every draw frame.
+- **Palette count reduced from 9 to 3**: High-Contrast White, Deep Industrial Navy, Quantum Blackhole. Focuses the palette selector on the three most functionally distinct profiles.
+
+#### Removed
+- `script.js` — superseded by the `js/` module tree.
+- `style.css` (root-level) — moved to `css/style.css`.
+- Inline `onclick` handlers (`closeModal`, `applySettings`, `exportJSON`, `addBlock`, `saveEditor`) — replaced by `id`-based event listeners in `AppController`.
+- Module-level variables (`showSoft`, `showHard`, `showGrid`, `showNets`, `draggedBlock`, `hoveredBlock`, `snapGuides`, `isPanning`, `panX/Y`) — encapsulated into class instances.
 
 ---
 
